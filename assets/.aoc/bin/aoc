@@ -1,0 +1,241 @@
+#!/usr/bin/env ruby
+
+require 'colorize'
+require 'digest'
+require 'fileutils'
+require 'open3'
+
+INPUT_FILE = 'input.txt'
+CONFIG_DIR = "#{Dir::home}/.aoc"
+MD5_TO_IGNORE = 'a6d292cd64c7e0117c4c755c1a7214c7'
+
+def star_exists? day, star
+  file_name = "day#{day}/star#{star}.rb"
+  File.exists? file_name and Digest::MD5.file(file_name).hexdigest != MD5_TO_IGNORE
+end
+
+def execute day, star, input_file
+  dir = "day#{day}"
+  input = "#{dir}/#{input_file}"
+  unless File.exists? "#{dir}"
+    STDERR.puts "### NO FILES FOR DAY #{day} FOUND ###".red
+    exit
+  end
+  unless star_exists? day, star
+    STDERR.puts "### NO FILES FOR STAR #{star} FOUND ###".red
+    exit
+  end
+  unless File.exists? input
+    STDERR.puts '### NO INPUT FILE ###'.red
+    exit
+  end
+
+  return Open3.popen3("ruby #{dir}/star#{star}.rb #{input}")
+end
+
+def run_star day, star
+  stdin, stdout, stderr, wait_thr = execute day, star, INPUT_FILE
+  stderr.read.lines.each{|l| puts "  " + l}
+
+  puts '== OUTPUT ========'
+  puts stdout.read
+  puts '=================='
+end
+
+def test_star day, star
+  dir = "day#{day}"
+
+  print 'Test: ' + "Day #{day} - Star #{star}".colorize(color: star == 2 ? :light_yellow : :yellow) + '...'
+
+  stdin, stdout, stderr, wait_thr = execute day, star, 'example'
+  out = stdout.read.chomp
+
+  result = File.read("#{dir}/example_result_#{star}").chomp
+
+  if result == out
+    puts " OK".green
+    return true
+  else
+    puts " FAILED!".red
+
+    puts "  Expected #{result.yellow} but got #{out.yellow}"
+    stderr.read.lines.each{|l| puts ">  " + l}
+
+    return false
+  end
+end
+
+def test_all
+  days = Dir['day*/']
+
+  days.map{|d| d.gsub(/day/, '').to_i}.sort.each do |day|
+
+    (1..2).each do |star|
+      return unless test_star day, star if star_exists? day, star
+    end
+
+  end
+end
+
+def test_last
+  days = Dir['day*/']
+
+  last_day = -1
+  last_star = -1
+
+  days.map{|d| d.gsub(/day/, '').to_i}.sort.each do |day|
+
+    (1..2).each do |star|
+      file_name = "day#{day}/star#{star}.rb"
+      if star_exists? day, star
+        if last_day < day
+          last_day = day
+          last_star = star
+        elsif last_day == day
+          last_star = [last_star, star].max
+        end
+      end
+    end
+  end
+
+  if last_star <= 0
+    STDERR.puts "No stars found"
+    exit 2
+  end
+
+  test_star last_day, last_star
+end
+
+def run_last
+  days = Dir['day*/']
+
+  last_day = -1
+  last_star = -1
+
+  days.map{|d| d.gsub(/day/, '').to_i}.sort.each do |day|
+
+    (1..2).each do |star|
+      file_name = "day#{day}/star#{star}.rb"
+      if star_exists? day, star
+        if last_day < day
+          last_day = day
+          last_star = star
+        elsif last_day == day
+          last_star = [last_star, star].max
+        end
+      end
+    end
+  end
+
+  if last_star <= 0
+    STDERR.puts "No stars found"
+    exit 2
+  end
+
+  run_star last_day, last_star
+end
+
+def add_day day
+  base_dir = File.dirname $PROGRAM_NAME
+  day_dir = "day#{day}/"
+  skeleton_dir = "#{CONFIG_DIR}/skeleton"
+  if File.exists? day_dir
+    STDERR.puts "Day #{day} already exists"
+    exit 2
+  end
+
+  FileUtils.cp_r skeleton_dir, day_dir
+end
+
+def die_with_usage
+    STDERR.puts "#{$PROGRAM_NAME} <command> [day] [star]"
+    STDERR.puts "  commands:"
+    $options.each do |opt|
+      STDERR.puts "    #{opt.usage}" unless opt.usage.nil?
+    end
+    exit 1
+end
+
+class Option
+  attr_reader :name
+
+  def initialize name, operation, args=[]
+    @name = name
+    @operation = operation
+    @args = args
+  end
+
+  def applies? args
+    @name == args[0] or "--#@name" == args[0]
+  end
+
+  def extract_arguments args
+    res = {}
+    @args.each.with_index do |type, i|
+      value = args[i+1]
+      die_with_usage unless type.valid? value
+      res[type.name] = value
+    end
+    res
+  end
+
+  def apply args
+    arguments = extract_arguments args
+    @operation.call arguments
+  end
+
+  def usage
+    arguments = @args.map{|a| a.optional? ? " [#{a.name}]" : " <#{a.name}>"}.join()
+    @name + arguments
+  end
+end
+
+class DefaultOption < Option
+  def initialize
+    super('default', -> (args) {die_with_usage})
+  end
+
+  def applies? args
+    true
+  end
+
+  def usage
+    nil
+  end
+end
+
+class OptionArgument
+  attr_reader :name
+
+  def initialize name, validator, optional=false
+    @name = name
+    @validator = validator
+    @optional = optional
+  end
+
+  def self.int name
+    OptionArgument.new name, -> (value) { value.to_i > 0 }
+  end
+
+  def optional?
+    @optional
+  end
+
+  def valid? value
+    @validator.call(value)
+  end
+end
+
+$options = [
+  Option.new('test-all', ->(args) {test_all}),
+  Option.new('test-last', ->(args) {test_last}),
+  Option.new('test-star', ->(args) {test_star args[:day], args[:star]}, [OptionArgument.int(:day), OptionArgument.int(:star)]),
+  Option.new('run-last', ->(args) {run_last}),
+  Option.new('run-star', ->(args) {run_star args[:day], args[:star]}, [OptionArgument.int(:day), OptionArgument.int(:star)]),
+  Option.new('add-day', ->(args) {add_day args[:day]}, [OptionArgument.int(:day)]),
+  DefaultOption.new
+]
+
+$options.each do |opt|
+  return opt.apply ARGV if opt.applies? ARGV
+end
