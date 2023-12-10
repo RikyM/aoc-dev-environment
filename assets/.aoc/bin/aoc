@@ -47,7 +47,10 @@ def test_star day, star
 
   print 'Test: ' + "Day #{day} - Star #{star}".colorize(color: star == 2 ? :light_yellow : :yellow) + '...'
 
-  stdin, stdout, stderr, wait_thr = execute day, star, 'example'
+  file_name = 'example'
+  file_name = "example_#{star}" unless File.exists?  "#{dir}/#{file_name}"
+
+  stdin, stdout, stderr, wait_thr = execute day, star, file_name
   out = stdout.read.chomp
 
   result = File.read("#{dir}/example_result_#{star}").chomp
